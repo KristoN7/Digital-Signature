@@ -1,0 +1,347 @@
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generowanie Kluczy RSA i Hashowanie Plików</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/0.9.0/forge.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha3/0.8.0/sha3.min.js"></script>
+
+    <style>
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+
+        .section {
+            width: 300px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            display: block;
+            margin: 10px 0;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        #compareSection {
+            width: 100%;
+            text-align: center;
+            font-size: 1.5em;
+        }
+
+        #hashComparisonResult {
+            font-size: 2em;
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="section">
+            <h2>Generowanie Kluczy RSA</h2>
+            Wybierz plik z losowym ciągiem bitów:  <br></br>
+            <input type="file" id="seedFile" accept=".txt"><br></br>
+            <button onclick="generateKeys()">Generuj Klucze</button>
+            <button onclick="downloadKeys()">Pobierz Klucze</button>
+            <pre id="publicKey"></pre>
+            <pre id="privateKey"></pre>
+
+        </div>
+
+        <div class="section">
+            
+            <h2>Hashowanie Plików SHA-3</h2>
+            Wybierz plik:  <br></br>
+            <input type="file" id="hashFile"> <br></br>
+            <button onclick="hashFile()">Hashuj Plik</button>
+            <button onclick="downloadHash()">Pobierz Hash</button>
+            <pre id="fileHash"></pre>
+
+        </div>
+
+        <div class="section">
+            <h2>Szyfrowanie Hash</h2>
+            <button onclick="encryptHash()">Zaszyfruj Hash</button>
+            <button onclick="downloadEncryptedHash()">Pobierz Zaszyfrowany Hash</button>
+            <pre id="encryptedHash"></pre>
+
+        </div>
+
+        <div class="section">
+            <h2>Deszyfrowanie Hash</h2>
+            Wybierz plik z kluczem publicznym:  <br></br>
+            <input type="file" id="publicKeyFile"><br></br>
+            Wybierz plik z zaszyfrowanym hashem:  <br></br>
+            <input type="file" id="encryptedHashFile" accept=".txt">
+            <button onclick="decryptHash()">Odszyfruj Hash</button>
+            <pre id="decryptedHash"></pre>
+        </div>
+
+        <div class="section">
+            <h2>Hashowanie Drugiego Pliku SHA-3</h2>
+            Wybierz plik:  <br></br>
+            <input type="file" id="hashFile2"><br></br>
+            <button onclick="hashFile2()">Hashuj Drugi Plik</button>
+            <button onclick="downloadHash2()">Pobierz Hash2</button>
+            <pre id="fileHash2"></pre>
+
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="compareSection">
+            <h2>Porównywanie Hashy</h2>
+            <button onclick="compareHashes()" style="text-align: center;">Porównaj Hashe</button>
+            <pre id="hashComparisonResult"></pre>
+        </div>
+    </div>
+
+
+
+
+    <script>
+        var publicKeyPem;
+        var privateKeyPem;
+        var hash;
+        var encryptedHash;
+        var hash2;
+        var decryptedHash;
+
+        function generateKeys() {
+            const fileInput = document.getElementById('seedFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Wybierz plik z losowym ciągiem bitów!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const seed = event.target.result.trim();
+
+                const forge = window.forge;
+
+                // Create a SHA-256 hash from the seed
+                const md = forge.md.sha256.create();
+                md.update(seed);
+                const seedHash = md.digest().getBytes();
+
+                // Create a custom PRNG using the seed hash
+                const customPrng = {
+                    _seed: seedHash,
+                    _offset: 0,
+                    getBytesSync: function(count) {
+                        let output = '';
+                        while (output.length < count) {
+                            if (this._offset >= this._seed.length) {
+                                md.start();
+                                md.update(this._seed);
+                                this._seed = md.digest().getBytes();
+                                this._offset = 0;
+                            }
+                            output += this._seed.charAt(this._offset++);
+                        }
+                        return output;
+                    }
+                };
+
+                // Generate RSA key pair with custom PRNG
+                const keypair = forge.pki.rsa.generateKeyPair({
+                    bits: 2048,
+                    e: 0x10001,
+                    prng: customPrng
+                });
+
+                publicKeyPem = forge.pki.publicKeyToPem(keypair.publicKey);
+                privateKeyPem = forge.pki.privateKeyToPem(keypair.privateKey);
+
+                document.getElementById('publicKey').textContent = publicKeyPem;
+                document.getElementById('privateKey').textContent = privateKeyPem;
+            };
+
+            reader.readAsText(file);
+        }
+
+        function downloadKeys() {
+            if (!publicKeyPem || !privateKeyPem) {
+                alert('Najpierw wygeneruj klucze!');
+                return;
+            }
+
+            downloadFile('publicKey.pem', publicKeyPem);
+            downloadFile('privateKey.pem', privateKeyPem);
+        }
+
+        function downloadFile(filename, content) {
+            const element = document.createElement('a');
+            const blob = new Blob([content], { type: 'application/x-pem-file' });
+            element.href = URL.createObjectURL(blob);
+            element.download = filename;
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+        }
+
+        function hashFile() {
+            const fileInput = document.getElementById('hashFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Wybierz plik do hashowania!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                const byteArray = new Uint8Array(arrayBuffer);
+                hash = sha3_256(byteArray);
+
+                document.getElementById('fileHash').textContent = hash;
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadHash() {
+            if (!hash) {
+                alert('Najpierw wygeneruj hash!');
+                return;
+            }
+
+            downloadFile('fileHash.txt', hash);
+        }
+
+        function encryptHash() {
+            if (!hash) {
+                alert('Najpierw wygeneruj hash!');
+                return;
+            }
+
+            if (!privateKeyPem) {
+                alert('Najpierw wygeneruj klucze!');
+                return;
+            }
+
+            const forge = window.forge;
+            const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+
+            const md = forge.md.sha256.create();
+            md.update(hash);
+            const encrypted = privateKey.sign(md);
+
+            encryptedHash = forge.util.encode64(encrypted);
+            document.getElementById('encryptedHash').textContent = encryptedHash;
+        }
+
+        function downloadEncryptedHash() {
+            if (!encryptedHash) {
+                alert('Najpierw zaszyfruj hash!');
+                return;
+            }
+
+            downloadFile('encryptedHash.txt', encryptedHash);
+        }
+
+        function hashFile2() {
+            const fileInput = document.getElementById('hashFile2');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Wybierz plik do hashowania!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                const byteArray = new Uint8Array(arrayBuffer);
+                hash2 = sha3_256(byteArray);
+
+                document.getElementById('fileHash2').textContent = hash2;
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadHash2() {
+            if (!hash2) {
+                alert('Najpierw wygeneruj drugi hash!');
+                return;
+            }
+
+            downloadFile('fileHash2.txt', hash2);
+        }
+
+        function decryptHash() {
+            const publicKeyFileInput = document.getElementById('publicKeyFile');
+            const encryptedHashFileInput = document.getElementById('encryptedHashFile');
+
+           const publicKeyFile = publicKeyFileInput.files[0];
+            const encryptedHashFile = encryptedHashFileInput.files[0];
+
+            if (!publicKeyFile || !encryptedHashFile) {
+                alert('Wybierz plik z kluczem publicznym oraz plik z zaszyfrowanym hashem!');
+                return;
+            }
+
+            const publicKeyReader = new FileReader();
+            const encryptedHashReader = new FileReader();
+
+            publicKeyReader.onload = function(event) {
+                const publicKeyPem2 = event.target.result.trim();
+                const forge = window.forge;
+
+                encryptedHashReader.onload = function(event) {
+                    const encryptedHashContent = event.target.result.trim();
+                    try {
+                        const publicKey = forge.pki.publicKeyFromPem(publicKeyPem2);
+                        const decodedEncryptedHash = forge.util.decode64(encryptedHashContent);
+
+                        // Verify the signature using the public key
+                        const md = forge.md.sha256.create();
+                        md.update(hash);
+                        const isValid = publicKey.verify(md.digest().bytes(), decodedEncryptedHash);
+
+                        decryptedHash = isValid ? hash : null;
+
+                        document.getElementById('decryptedHash').textContent = decryptedHash ? decryptedHash : 'Błąd weryfikacji hasha';
+                    } catch (error) {
+                        console.error(error);
+                        alert('Błąd podczas odszyfrowywania hash. Upewnij się, że wprowadziłeś poprawny klucz publiczny.');
+                    }
+                };
+
+                encryptedHashReader.readAsText(encryptedHashFile);
+            };
+
+            publicKeyReader.readAsText(publicKeyFile);
+        }
+
+        function compareHashes() {
+            if (!hash2 || !decryptedHash) {
+                alert('Najpierw wygeneruj i odszyfruj hashe obu plików!');
+                return;
+            }
+
+            const areEqual = (hash2 === decryptedHash);
+            const result = areEqual ? 'Hashe są identyczne' : 'Hashe nie są identyczne';
+
+            document.getElementById('hashComparisonResult').textContent = result;
+        }
+    </script>
+</body>
+</html>
